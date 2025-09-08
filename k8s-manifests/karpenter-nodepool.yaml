@@ -1,0 +1,55 @@
+apiVersion: karpenter.sh/v1beta1
+kind: NodePool
+metadata:
+  name: default
+spec:
+  template:
+    metadata:
+      labels:
+        intent: apps
+    spec:
+      requirements:
+        - key: kubernetes.io/arch
+          operator: In
+          values: ["amd64"]
+        - key: kubernetes.io/os
+          operator: In
+          values: ["linux"]
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["spot", "on-demand"]
+        - key: node.kubernetes.io/instance-type
+          operator: In
+          values: ["t3.medium", "t3.large", "t3.xlarge"]
+      nodeClassRef:
+        apiVersion: karpenter.k8s.aws/v1beta1
+        kind: EC2NodeClass
+        name: default
+      taints:
+        - key: example.com/special-taint
+          value: "true"
+          effect: NoSchedule
+  limits:
+    cpu: 1000
+  disruption:
+    consolidationPolicy: WhenEmpty
+    consolidateAfter: 30s
+---
+apiVersion: karpenter.k8s.aws/v1beta1
+kind: EC2NodeClass
+metadata:
+  name: default
+spec:
+  amiFamily: AL2
+  subnetSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: "my-dev-eks-cluster"
+  securityGroupSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: "my-dev-eks-cluster"
+  instanceStorePolicy: NVME
+  userData: |
+    #!/bin/bash
+    /etc/eks/bootstrap.sh my-dev-eks-cluster
+    echo 'net.ipv4.conf.all.route_localnet = 1' >> /etc/sysctl.conf
+    sysctl -p /etc/sysctl.conf

@@ -1,0 +1,40 @@
+name: Security Scanning
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # Daily at 2 AM
+  workflow_dispatch:
+
+jobs:
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Run TFSec
+        uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          working_directory: eks-terraform/
+
+      - name: Run Semgrep
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: >-
+            p/security-audit
+            p/secrets
+            p/terraform
+
+      - name: Run KICS
+        uses: checkmarx/kics-github-action@v1.7.0
+        with:
+          path: 'eks-terraform/'
+          output_path: 'kics-results/'
+          platform_type: 'terraform'
+          output_formats: 'json,sarif'
+
+      - name: Upload KICS Results
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'kics-results/results.sarif'

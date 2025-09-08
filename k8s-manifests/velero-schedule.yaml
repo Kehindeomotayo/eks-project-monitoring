@@ -1,0 +1,34 @@
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: daily-backup
+  namespace: velero
+spec:
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  template:
+    includedNamespaces:
+    - default
+    - monitoring
+    - logging
+    - argocd
+    excludedResources:
+    - events
+    - events.events.k8s.io
+    storageLocation: default
+    ttl: 720h0m0s  # 30 days
+---
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: weekly-backup
+  namespace: velero
+spec:
+  schedule: "0 1 * * 0"  # Weekly on Sunday at 1 AM
+  template:
+    includedNamespaces:
+    - "*"
+    excludedResources:
+    - events
+    - events.events.k8s.io
+    storageLocation: default
+    ttl: 2160h0m0s  # 90 days

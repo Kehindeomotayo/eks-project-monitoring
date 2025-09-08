@@ -1,0 +1,8 @@
+# Global owners
+* @devops-team @security-team
+
+# Terraform infrastructure
+eks-terraform/ @infrastructure-team @devops-team
+
+# Security and compliance
+.github/workflows/ @security-team @devops-team
