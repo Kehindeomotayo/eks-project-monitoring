@@ -10,6 +10,16 @@ resource "aws_vpc" "main" {
   }
 }
 
+# Restrict default security group
+resource "aws_default_security_group" "default" {
+  vpc_id = aws_vpc.main.id
+
+  # No ingress or egress rules - deny all traffic
+  tags = {
+    Name = "${var.cluster_name}-default-sg-restricted"
+  }
+}
+
 # Internet Gateway
 resource "aws_internet_gateway" "main" {
   vpc_id = aws_vpc.main.id
@@ -51,6 +61,18 @@ resource "aws_subnet" "private" {
 }
 
 # Single NAT Gateway for cost optimization (use count = length(var.availability_zones) for HA)
+resource "aws_nat_gateway" "main" {
+  count = 1
+
+  allocation_id = aws_eip.nat[0].id
+  subnet_id     = aws_subnet.public[0].id
+  depends_on    = [aws_internet_gateway.main]
+
+  tags = {
+    Name = "${var.cluster_name}-nat"
+  }
+}
+
 resource "aws_eip" "nat" {
   count = 1
 
@@ -59,17 +81,6 @@ resource "aws_eip" "nat" {
 
   tags = {
     Name = "${var.cluster_name}-nat-eip"
-  }
-}
-
-resource "aws_nat_gateway" "main" {
-  count = 1
-
-  allocation_id = aws_eip.nat[0].id
-  subnet_id     = aws_subnet.public[0].id
-
-  tags = {
-    Name = "${var.cluster_name}-nat"
   }
 }
 
