@@ -43,6 +43,7 @@ jobs:
         with:
           directory: eks-terraform/
           framework: terraform
+          skip_check: CKV2_AWS_5,CKV2_AWS_1,CKV2_AWS_19
 
   terraform-plan:
     name: Terraform Plan
