@@ -1,4 +1,5 @@
 name: Terraform CI/CD Pipeline
+# Updated to fix SARIF upload issues
 
 permissions:
   contents: read
