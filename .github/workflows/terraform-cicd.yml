@@ -59,24 +59,21 @@ jobs:
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
-      - name: Debug AWS Credentials
-        run: |
-          echo "Checking secrets..."
-          if [ -z "$AWS_ACCESS_KEY_ID" ]; then echo "AWS_ACCESS_KEY_ID is empty"; else echo "AWS_ACCESS_KEY_ID exists"; fi
-          if [ -z "$AWS_SECRET_ACCESS_KEY" ]; then echo "AWS_SECRET_ACCESS_KEY is empty"; else echo "AWS_SECRET_ACCESS_KEY exists"; fi
+      - name: Configure AWS Credentials
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+          AWS_DEFAULT_REGION: ${{ env.AWS_REGION }}
+        run: |
+          echo "Testing AWS credentials"
+          aws sts get-caller-identity
 
       - name: Terraform Init
         working-directory: eks-terraform
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ env.AWS_REGION }}
         run: terraform init
 
       - name: Terraform Validate
@@ -89,6 +86,10 @@ jobs:
 
       - name: Terraform Plan
         working-directory: eks-terraform
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ env.AWS_REGION }}
         run: |
           terraform plan -var-file="dev.tfvars" -out=tfplan
           terraform show -json tfplan > plan.json
