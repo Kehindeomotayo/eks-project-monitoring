@@ -36,7 +36,7 @@ resource "helm_release" "kube_prometheus_stack" {
           port = 80
           targetPort = 3000
           annotations = {
-            "service.beta.kubernetes.io/aws-load-balancer-security-groups" = aws_security_group.loadbalancer.id
+
           }
         }
         datasources = {
