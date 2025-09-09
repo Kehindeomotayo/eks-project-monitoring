@@ -48,7 +48,7 @@ resource "aws_kms_alias" "eks" {
 
 resource "aws_cloudwatch_log_group" "eks" {
   name              = "/aws/eks/${var.cluster_name}/cluster"
-  retention_in_days = 1
+  retention_in_days = 365
   kms_key_id        = aws_kms_key.eks.arn
 
   tags = {
@@ -149,40 +149,7 @@ resource "aws_security_group" "eks_nodes" {
   }
 }
 
-# Security Group for LoadBalancers
-resource "aws_security_group" "loadbalancer" {
-  name_prefix = "${var.cluster_name}-lb-"
-  description = "Security group for load balancers"
-  vpc_id      = aws_vpc.main.id
-
-  ingress {
-    description = "HTTP access for load balancer"
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    description = "HTTPS access for load balancer"
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  egress {
-    description = "Outbound traffic to VPC"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = [aws_vpc.main.cidr_block]
-  }
-
-  tags = {
-    Name = "${var.cluster_name}-lb-sg"
-  }
-}
+# Load balancer security group will be created by Kubernetes service when needed
 
 # AWS Secrets Manager
 # resource "aws_secretsmanager_secret" "db_credentials" {

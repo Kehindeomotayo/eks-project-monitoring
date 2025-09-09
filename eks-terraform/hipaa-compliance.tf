@@ -25,22 +25,22 @@ resource "aws_network_acl" "private" {
     to_port    = 80
   }
 
-  # Allow ephemeral ports
+  # Allow ephemeral ports from VPC only
   ingress {
     protocol   = "tcp"
     rule_no    = 120
     action     = "allow"
-    cidr_block = "0.0.0.0/0"
+    cidr_block = aws_vpc.main.cidr_block
     from_port  = 1024
     to_port    = 65535
   }
 
-  # Allow all outbound
+  # Allow outbound to VPC only
   egress {
     protocol   = "-1"
     rule_no    = 100
     action     = "allow"
-    cidr_block = "0.0.0.0/0"
+    cidr_block = aws_vpc.main.cidr_block
     from_port  = 0
     to_port    = 0
   }
@@ -60,7 +60,7 @@ resource "aws_flow_log" "vpc" {
 
 resource "aws_cloudwatch_log_group" "vpc_flow_log" {
   name              = "/aws/vpc/flowlogs/${var.cluster_name}"
-  retention_in_days = 1
+  retention_in_days = 365
   kms_key_id        = aws_kms_key.eks.arn
 }
 
@@ -97,7 +97,7 @@ resource "aws_iam_role_policy" "flow_log" {
           "logs:DescribeLogStreams"
         ]
         Effect   = "Allow"
-        Resource = "*"
+        Resource = "arn:aws:logs:${var.region}:${data.aws_caller_identity.current.account_id}:log-group:/aws/vpc/flowlogs/${var.cluster_name}*"
       }
     ]
   })
