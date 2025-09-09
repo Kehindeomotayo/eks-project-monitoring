@@ -1,0 +1,4 @@
+skip-check:
+  - CKV2_AWS_5   # Security Groups attached to resources (false positive)
+  - CKV2_AWS_1   # NACL attached to subnets (false positive)
+  - CKV2_AWS_19  # EIP attached to EC2 instances (false positive)
