@@ -33,13 +33,13 @@ resource "aws_eks_addon" "ebs_csi_driver" {
 
 # AWS Load Balancer Controller
 resource "helm_release" "aws_load_balancer_controller" {
-  namespace = "kube-system"
-  name      = "aws-load-balancer-controller"
+  namespace  = "kube-system"
+  name       = "aws-load-balancer-controller"
   repository = "https://aws.github.io/eks-charts"
-  chart     = "aws-load-balancer-controller"
-  version   = "1.6.2"
-  timeout   = 600
-  wait      = true
+  chart      = "aws-load-balancer-controller"
+  version    = "1.6.2"
+  timeout    = 600
+  wait       = true
 
   values = [
     yamlencode({

@@ -16,11 +16,11 @@ resource "helm_release" "kube_prometheus_stack" {
           retention = "7d"
           resources = {
             requests = {
-              cpu = "200m"
+              cpu    = "200m"
               memory = "512Mi"
             }
             limits = {
-              cpu = "1000m"
+              cpu    = "1000m"
               memory = "2Gi"
             }
           }
@@ -32,18 +32,18 @@ resource "helm_release" "kube_prometheus_stack" {
         }
         adminPassword = "admin123"
         service = {
-          type = "LoadBalancer"
-          port = 80
+          type       = "LoadBalancer"
+          port       = 80
           targetPort = 3000
         }
         datasources = {
           "datasources.yaml" = {
             apiVersion = 1
             datasources = [{
-              name = "Prometheus"
-              type = "prometheus"
-              url = "http://kube-prometheus-stack-prometheus:9090"
-              access = "proxy"
+              name      = "Prometheus"
+              type      = "prometheus"
+              url       = "http://kube-prometheus-stack-prometheus:9090"
+              access    = "proxy"
               isDefault = true
             }]
           }
@@ -53,11 +53,11 @@ resource "helm_release" "kube_prometheus_stack" {
         alertmanagerSpec = {
           resources = {
             requests = {
-              cpu = "100m"
+              cpu    = "100m"
               memory = "128Mi"
             }
             limits = {
-              cpu = "500m"
+              cpu    = "500m"
               memory = "512Mi"
             }
           }
