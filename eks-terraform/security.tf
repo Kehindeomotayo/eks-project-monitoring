@@ -59,9 +59,11 @@ resource "aws_cloudwatch_log_group" "eks" {
 # Security Groups
 resource "aws_security_group" "eks_cluster" {
   name_prefix = "${var.cluster_name}-cluster-"
+  description = "Security group for EKS cluster control plane"
   vpc_id      = aws_vpc.main.id
 
   ingress {
+    description = "HTTPS access from VPC"
     from_port   = 443
     to_port     = 443
     protocol    = "tcp"
@@ -69,10 +71,11 @@ resource "aws_security_group" "eks_cluster" {
   }
 
   egress {
+    description = "All outbound traffic for cluster communication"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = [aws_vpc.main.cidr_block]
   }
 
   tags = {
@@ -82,16 +85,19 @@ resource "aws_security_group" "eks_cluster" {
 
 resource "aws_security_group" "eks_nodes" {
   name_prefix = "${var.cluster_name}-nodes-"
+  description = "Security group for EKS worker nodes"
   vpc_id      = aws_vpc.main.id
 
   ingress {
-    from_port = 0
-    to_port   = 65535
-    protocol  = "tcp"
-    self      = true
+    description = "Node to node communication"
+    from_port   = 0
+    to_port     = 65535
+    protocol    = "tcp"
+    self        = true
   }
 
   ingress {
+    description     = "Cluster to node communication"
     from_port       = 1025
     to_port         = 65535
     protocol        = "tcp"
@@ -99,41 +105,43 @@ resource "aws_security_group" "eks_nodes" {
   }
 
   ingress {
+    description     = "HTTPS from cluster"
     from_port       = 443
     to_port         = 443
     protocol        = "tcp"
     security_groups = [aws_security_group.eks_cluster.id]
   }
 
-  # Allow Prometheus access
   ingress {
+    description = "Prometheus metrics from VPC"
     from_port   = 9090
     to_port     = 9090
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = [aws_vpc.main.cidr_block]
   }
 
-  # Allow Grafana access
   ingress {
+    description = "Grafana dashboard from VPC"
     from_port   = 3000
     to_port     = 3000
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = [aws_vpc.main.cidr_block]
   }
 
-  # Allow HTTP for Grafana
   ingress {
+    description = "HTTP for health checks from VPC"
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = [aws_vpc.main.cidr_block]
   }
 
   egress {
+    description = "All outbound traffic for updates and communication"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = [aws_vpc.main.cidr_block]
   }
 
   tags = {
@@ -144,6 +152,7 @@ resource "aws_security_group" "eks_nodes" {
 # Security Group for LoadBalancers
 resource "aws_security_group" "loadbalancer" {
   name_prefix = "${var.cluster_name}-lb-"
+  description = "Security group for load balancers"
   vpc_id      = aws_vpc.main.id
 
   ingress {

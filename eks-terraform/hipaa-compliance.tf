@@ -61,6 +61,7 @@ resource "aws_flow_log" "vpc" {
 resource "aws_cloudwatch_log_group" "vpc_flow_log" {
   name              = "/aws/vpc/flowlogs/${var.cluster_name}"
   retention_in_days = 1
+  kms_key_id        = aws_kms_key.eks.arn
 }
 
 resource "aws_iam_role" "flow_log" {
