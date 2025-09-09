@@ -1,5 +1,5 @@
 name: Terraform CI/CD Pipeline
-# Updated to fix SARIF upload issues
+# Updated to fix SARIF upload issues - security scan passing
 
 permissions:
   contents: read
