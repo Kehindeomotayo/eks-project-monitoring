@@ -8,4 +8,3 @@ private_subnet_cidrs = ["10.0.10.0/24", "10.0.20.0/24"]
 # db_instance_class    = "db.t3.micro"
 # db_name              = "appdb"
 # db_username          = "dbadmin"
-###
