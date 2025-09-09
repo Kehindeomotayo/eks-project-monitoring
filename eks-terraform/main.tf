@@ -52,3 +52,4 @@ resource "aws_eks_node_group" "eks_nodes_1" {
     min_size     = 1
   }
 }*/
+##
