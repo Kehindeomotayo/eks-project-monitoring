@@ -1,140 +1,211 @@
 pipeline {
     agent any
-
+    
     environment {
-        FRONTEND_IMAGE = "your-frontend-image:latest"
-        DOCKER_IMAGE = "your-image:latest"
-        AWS_ACCESS_KEY_ID = credentials('xxx') // Jenkins credential ID for access key
-        AWS_SECRET_ACCESS_KEY = credentials('xxx') // Jenkins credential ID for secret key
-        ECR_REPO = ""
-        ECS_TASK_DEFINITION = "task-web-app"
-        ECS_CLUSTER =  "Full-stack-web-app"
-        ECS_SERVICE = "web-app-service"
-        AWS_REGION = "us-east-1"
-        SONAR_PROJECT_KEY = "3-Tier-web-architecture"
-        SONAR_ORG = "ecs-ci-cd"
-        SONAR_TOKEN = credentials('xxx') // Add token in Jenkins credentials
-        SONAR_SCANNER_PATH = '/opt/sonar-scanner/bin'
-        PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/snap/bin:${SONAR_SCANNER_PATH}"
+        TF_VERSION = '1.3.0'
+        AWS_REGION = 'us-east-1'
+        AWS_CREDENTIALS = credentials('aws-credentials')
     }
-
+    
+    parameters {
+        choice(
+            name: 'ACTION',
+            choices: ['plan', 'apply', 'destroy'],
+            description: 'Terraform action to perform'
+        )
+    }
+    
     stages {
         stage('Checkout') {
             steps {
                 checkout scm
             }
         }
-
-        stage('Clone Repository') {
-            steps {
-                git branch: 'main', url: 'https://github.com/holadmex/3-Tier-web-architecture.git'
+        
+        stage('Security Scan') {
+            parallel {
+                stage('Trivy Scan') {
+                    steps {
+                        script {
+                            sh '''
+                                docker run --rm -v $(pwd):/workspace aquasec/trivy:latest config /workspace/eks-terraform/ \
+                                --exit-code 1 --format table
+                            '''
+                        }
+                    }
+                }
+                
+                stage('Checkov Scan') {
+                    steps {
+                        script {
+                            sh '''
+                                docker run --rm -v $(pwd):/workspace bridgecrew/checkov:latest \
+                                --directory /workspace/eks-terraform/ \
+                                --framework terraform \
+                                --soft-fail \
+                                --output cli
+                            '''
+                        }
+                    }
+                }
             }
         }
-        stage('SonarCloud Analysis') {
+        
+        stage('Terraform Init') {
             steps {
-                withSonarQubeEnv('SonarCloud') {
+                dir('eks-terraform') {
+                    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
+                        sh '''
+                            terraform init
+                        '''
+                    }
+                }
+            }
+        }
+        
+        stage('Terraform Validate') {
+            steps {
+                dir('eks-terraform') {
+                    sh 'terraform validate'
+                }
+            }
+        }
+        
+        stage('Terraform Format Check') {
+            steps {
+                dir('eks-terraform') {
+                    sh 'terraform fmt -check'
+                }
+            }
+        }
+        
+        stage('Terraform Plan') {
+            when {
+                anyOf {
+                    params.ACTION == 'plan'
+                    params.ACTION == 'apply'
+                }
+            }
+            steps {
+                dir('eks-terraform') {
+                    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
+                        sh '''
+                            terraform plan -var-file="dev.tfvars" -out=tfplan
+                            terraform show -json tfplan > plan.json
+                        '''
+                    }
+                }
+                archiveArtifacts artifacts: 'eks-terraform/plan.json', fingerprint: true
+            }
+        }
+        
+        stage('Terraform Apply') {
+            when {
+                allOf {
+                    params.ACTION == 'apply'
+                    branch 'main'
+                }
+            }
+            steps {
+                dir('eks-terraform') {
+                    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
+                        sh '''
+                            terraform apply -var-file="dev.tfvars" -auto-approve
+                        '''
+                    }
+                }
+            }
+        }
+        
+        stage('Update Kubeconfig') {
+            when {
+                allOf {
+                    params.ACTION == 'apply'
+                    branch 'main'
+                }
+            }
+            steps {
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
                     sh '''
-                    sonar-scanner \
-                    -Dsonar.projectKey=3-Tier-web-architecture \
-                    -Dsonar.organization=ecs-ci-cd \
-                    -Dsonar.login=$SONAR_TOKEN \
-                    -Dsonar.host.url=https://sonarcloud.io \
-                    -Dsonar.sourceEncoding=UTF-8 \
-                    -Dsonar.sources=frontend \
-                    -Dsonar.exclusions=**/test/**,**/*.spec.js
+                        aws eks update-kubeconfig --region ${AWS_REGION} --name my-dev-eks-cluster
                     '''
                 }
             }
         }
-        stage('Wait for Quality Gate') {
+        
+        stage('Verify Deployment') {
+            when {
+                allOf {
+                    params.ACTION == 'apply'
+                    branch 'main'
+                }
+            }
+            steps {
+                sh '''
+                    kubectl get nodes
+                    kubectl get pods -A
+                '''
+            }
+        }
+        
+        stage('Wait Before Auto-Destroy') {
+            when {
+                allOf {
+                    params.ACTION == 'apply'
+                    branch 'main'
+                }
+            }
             steps {
                 script {
-                    def qualityGate = waitForQualityGate()
-                    if (qualityGate.status != 'OK') {
-                        error "Quality gate failed: ${qualityGate.status}"
+                    echo 'Waiting 5 minutes before auto-destroy...'
+                    sleep(300)
+                }
+            }
+        }
+        
+        stage('Auto-Destroy After Apply') {
+            when {
+                allOf {
+                    params.ACTION == 'apply'
+                    branch 'main'
+                }
+            }
+            steps {
+                dir('eks-terraform') {
+                    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
+                        sh '''
+                            terraform destroy -var-file="dev.tfvars" -auto-approve
+                        '''
                     }
                 }
             }
         }
-        stage('Build Frontend Docker Image') {
-            steps {
-                script {
-                    sh """
-                    docker build -t $FRONTEND_IMAGE -f frontend/Dockerfile frontend/
-                    """
-                }
+        
+        stage('Manual Destroy') {
+            when {
+                params.ACTION == 'destroy'
             }
-        }
-        stage('Run Trivy Scan') {
             steps {
-                script {
-                    // Scan the Docker image for vulnerabilities
-                    sh "trivy image --severity HIGH,CRITICAL $FRONTEND_IMAGE || exit 1"
-                }
-            }
-        }
-        stage('Push Docker Image to ECR') {
-            steps {
-                script {
-                    // Authenticate Docker to ECR
-                    sh """
-                    aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REPO
-                    docker tag $FRONTEND_IMAGE $ECR_REPO:$BUILD_NUMBER
-                    docker push $ECR_REPO:$BUILD_NUMBER
-                    """
-                }
-            }
-        }
-        stage('Update ECS Service') {
-            steps {
-                script {
-                    try {
-                        // Fetch current task definition
-                        def ecsTaskDefinition = sh(script: "aws ecs describe-task-definition --task-definition $ECS_TASK_DEFINITION", returnStdout: true).trim()
-        
-                        // Define the execution role ARN (replace with your actual role ARN)
-                        def executionRoleArn = "arn:aws:iam::429841094792:role/todo-app-role"
-        
-                        // Parse and update the image in container definitions
-                        def updatedTaskDefinition = sh(script: """
-                            echo '$ecsTaskDefinition' | jq -r '.taskDefinition.containerDefinitions | map(if .name == "frontend" then .image = "$ECR_REPO:$BUILD_NUMBER" else . end)' | jq -s '.[0]'
-                        """, returnStdout: true).trim()
-        
-                        // Register the new task definition for FARGATE with the proper compatibility and network mode
-                        def newTaskDefinition = sh(script: """
-                            aws ecs register-task-definition --family $ECS_TASK_DEFINITION \
-                                --container-definitions '$updatedTaskDefinition' \
-                                --requires-compatibilities FARGATE \
-                                --network-mode awsvpc \
-                                --cpu 1024 \
-                                --memory 3072 \
-                                --execution-role-arn $executionRoleArn
-                        """, returnStdout: true).trim()
-        
-                        // Extract the new revision number
-                        def newTaskRevision = sh(script: """
-                            echo '$newTaskDefinition' | jq -r '.taskDefinition.revision'
-                        """, returnStdout: true).trim()
-        
-                        // Update ECS service with the new task definition revision
-                        sh """
-                            aws ecs update-service --cluster $ECS_CLUSTER --service $ECS_SERVICE \
-                                --task-definition $ECS_TASK_DEFINITION:$newTaskRevision
-                        """
-                    } catch (Exception e) {
-                        echo "Error during ECS service update: ${e.message}"
-                        currentBuild.result = 'FAILURE'
-                        throw e
+                dir('eks-terraform') {
+                    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
+                        sh '''
+                            terraform destroy -var-file="dev.tfvars" -auto-approve
+                        '''
                     }
+                }
+            }
         }
     }
-}
-  }
+    
     post {
         always {
             cleanWs()
         }
+        success {
+            echo 'Pipeline completed successfully!'
+        }
+        failure {
+            echo 'Pipeline failed!'
+        }
     }
 }
-
-

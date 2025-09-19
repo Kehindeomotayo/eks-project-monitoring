@@ -1,0 +1,199 @@
+pipeline {
+    agent any
+    
+    environment {
+        // Define common environment variables
+        DOCKER_IMAGE_NAME = 'frontend'
+        BUILD_TAG = "${BUILD_NUMBER}"
+    }
+    
+    parameters {
+        choice(
+            name: 'ENVIRONMENT',
+            choices: ['dev', 'staging', 'prod'],
+            description: 'Target environment'
+        )
+        booleanParam(
+            name: 'SKIP_SONAR',
+            defaultValue: false,
+            description: 'Skip SonarCloud analysis'
+        )
+    }
+
+    stages {
+        stage('Checkout') {
+            steps { 
+                checkout scm 
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    sh "docker build -t ${DOCKER_IMAGE_NAME}:${BUILD_TAG} ./frontend"
+                    sh "docker tag ${DOCKER_IMAGE_NAME}:${BUILD_TAG} ${DOCKER_IMAGE_NAME}:latest"
+                }
+            }
+        }
+
+        stage('SonarCloud Analysis') {
+            when {
+                not { params.SKIP_SONAR }
+            }
+            steps {
+                withCredentials([string(credentialsId: 'SONAR_TOKEN', variable: 'SONAR_TOKEN')]) {
+                    withSonarQubeEnv('SonarCloud') {
+                        sh '''
+                        sonar-scanner \
+                          -Dsonar.projectKey=3-Tier-web-architecture \
+                          -Dsonar.organization=ecs-ci-cd \
+                          -Dsonar.login=$SONAR_TOKEN \
+                          -Dsonar.host.url=https://sonarcloud.io \
+                          -Dsonar.sourceEncoding=UTF-8 \
+                          -Dsonar.sources=frontend \
+                          -Dsonar.exclusions=**/test/**,**/*.spec.js
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Security Scan') {
+            parallel {
+                stage('Trivy Image Scan') {
+                    steps {
+                        sh """
+                        docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+                        aquasec/trivy:latest image --exit-code 1 --severity HIGH,CRITICAL \
+                        ${DOCKER_IMAGE_NAME}:${BUILD_TAG}
+                        """
+                    }
+                }
+                stage('Dockerfile Scan') {
+                    steps {
+                        sh """
+                        docker run --rm -v \$(pwd):/workspace aquasec/trivy:latest config \
+                        --exit-code 1 /workspace/frontend/Dockerfile
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Push to ECR') {
+            steps {
+                withCredentials([
+                    [$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials'],
+                    string(credentialsId: 'ECR_REPO', variable: 'ECR_REPO'),
+                    string(credentialsId: 'AWS_REGION', variable: 'AWS_REGION')
+                ]) {
+                    script {
+                        sh """
+                        aws ecr get-login-password --region \$AWS_REGION | \
+                        docker login --username AWS --password-stdin \$ECR_REPO
+                        
+                        docker tag ${DOCKER_IMAGE_NAME}:${BUILD_TAG} \$ECR_REPO:${BUILD_TAG}
+                        docker tag ${DOCKER_IMAGE_NAME}:${BUILD_TAG} \$ECR_REPO:latest
+                        
+                        docker push \$ECR_REPO:${BUILD_TAG}
+                        docker push \$ECR_REPO:latest
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Update ECS Service') {
+            steps {
+                withCredentials([
+                    [$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials'],
+                    string(credentialsId: 'ECS_TASK_DEFINITION', variable: 'ECS_TASK_DEFINITION'),
+                    string(credentialsId: 'ECS_CLUSTER', variable: 'ECS_CLUSTER'),
+                    string(credentialsId: 'ECS_SERVICE', variable: 'ECS_SERVICE'),
+                    string(credentialsId: 'ECR_REPO', variable: 'ECR_REPO'),
+                    string(credentialsId: 'AWS_REGION', variable: 'AWS_REGION')
+                ]) {
+                    script {
+                        // Get current task definition
+                        def taskDefJson = sh(
+                            script: "aws ecs describe-task-definition --task-definition \$ECS_TASK_DEFINITION --query 'taskDefinition'",
+                            returnStdout: true
+                        ).trim()
+                        
+                        // Update container image
+                        def updatedTaskDef = sh(
+                            script: """
+                            echo '${taskDefJson}' | jq '
+                                .containerDefinitions |= map(
+                                    if .name == "frontend" 
+                                    then .image = "\$ECR_REPO:${BUILD_TAG}"
+                                    else . end
+                                ) |
+                                del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .placementConstraints, .compatibilities, .registeredAt, .registeredBy)
+                            '
+                            """,
+                            returnStdout: true
+                        ).trim()
+                        
+                        // Register new task definition
+                        def newTaskDef = sh(
+                            script: "aws ecs register-task-definition --cli-input-json '${updatedTaskDef}' --query 'taskDefinition.taskDefinitionArn'",
+                            returnStdout: true
+                        ).trim()
+                        
+                        // Update service
+                        sh """
+                        aws ecs update-service \
+                            --cluster \$ECS_CLUSTER \
+                            --service \$ECS_SERVICE \
+                            --task-definition ${newTaskDef}
+                        """
+                        
+                        // Wait for deployment
+                        sh """
+                        aws ecs wait services-stable \
+                            --cluster \$ECS_CLUSTER \
+                            --services \$ECS_SERVICE
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Health Check') {
+            steps {
+                withCredentials([
+                    string(credentialsId: 'APP_URL', variable: 'APP_URL')
+                ]) {
+                    script {
+                        retry(5) {
+                            sleep(30)
+                            sh """
+                            curl -f \$APP_URL/health || exit 1
+                            """
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            // Clean up Docker images
+            sh """
+            docker rmi ${DOCKER_IMAGE_NAME}:${BUILD_TAG} || true
+            docker rmi ${DOCKER_IMAGE_NAME}:latest || true
+            """
+            cleanWs()
+        }
+        success {
+            echo "✅ Pipeline completed successfully!"
+            // Add notification here if needed
+        }
+        failure {
+            echo "❌ Pipeline failed!"
+            // Add notification here if needed
+        }
+    }
+}
